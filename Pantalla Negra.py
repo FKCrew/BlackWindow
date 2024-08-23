@@ -1,14 +1,17 @@
 import pystray
 from pystray import MenuItem as item
 from PIL import Image, ImageDraw
+import psutil
 import pygetwindow as gw
 import ctypes
 import threading
 import keyboard
 import time
+import tkinter as tk
 
-# Variable global para almacenar la ventana seleccionada
-selected_window = None
+# Variables globales para almacenar el handle de la ventana seleccionada y su PID
+selected_window_handle = None
+selected_process_pid = None
 
 # Lista de títulos de ventanas a excluir
 excluded_windows = ['Microsoft Text Input Application', 'Setup', 'Calculator', 
@@ -20,32 +23,53 @@ def set_window_opacity(hwnd, opacity):
     ctypes.windll.user32.SetWindowLongW(hwnd, -20, style | 0x80000)
     ctypes.windll.user32.SetLayeredWindowAttributes(hwnd, 0, opacity, 0x2)
 
-# Función para oscurecer la ventana seleccionada
-def darken_window():
-    global selected_window
-    if selected_window:
-        windows = gw.getWindowsWithTitle(selected_window)
-        if windows:
-            hwnd = windows[0]._hWnd
-            set_window_opacity(hwnd, 0)  # 0% de opacidad
+# Función para hacer las ventanas seleccionadas invisibles (opacidad 0%)
+def darken_windows():
+    global selected_window_handle
+    if selected_window_handle:
+        set_window_opacity(selected_window_handle, 0)  # 0% de opacidad
 
-# Función para restaurar la opacidad de la ventana seleccionada
-def restore_window():
-    global selected_window
-    if selected_window:
-        windows = gw.getWindowsWithTitle(selected_window)
-        if windows:
-            hwnd = windows[0]._hWnd
-            set_window_opacity(hwnd, 255)  # 100% de opacidad
+# Función para restaurar la opacidad de las ventanas seleccionadas al 100%
+def restore_windows():
+    global selected_window_handle
+    if selected_window_handle:
+        set_window_opacity(selected_window_handle, 255)  # 100% de opacidad
+
+# Función para mostrar una ventana emergente con el mensaje "Creado por"
+def show_message():
+    # Crear una ventana de tkinter
+    window = tk.Tk()
+    window.title("Información")
+    window.geometry("200x100")  # Dimensiones de la ventana
+
+    # Agregar una etiqueta con el mensaje
+    label = tk.Label(window, text="Creado por Eric Bravo", font=("Arial", 12))
+    label.pack(expand=True)
+
+    # Función para cerrar la ventana al presionar Esc
+    def close_on_escape(event):
+        window.destroy()
+
+    # Vincular la tecla Esc para cerrar la ventana
+    window.bind('<Escape>', close_on_escape)
+
+    # Ejecutar la ventana
+    window.mainloop()
 
 # Función que crea un item del menú para cada ventana
 def create_menu_item(window_title):
     return item(window_title, lambda: select_window(window_title))
 
-# Función para seleccionar la ventana desde el menú
+# Función para seleccionar la ventana y obtener el proceso asociado
 def select_window(window_title):
-    global selected_window
-    selected_window = window_title
+    global selected_window_handle, selected_process_pid
+
+    # Obtener la ventana seleccionada por su título
+    windows = gw.getWindowsWithTitle(window_title)
+    if windows:
+        selected_window_handle = windows[0]._hWnd  # Obtener el handle de la ventana
+        selected_process_pid = windows[0].processId  # Obtener el PID asociado a la ventana
+        print(f"Ventana seleccionada: {window_title}, PID: {selected_process_pid}")
 
 # Función para generar dinámicamente el menú de ventanas abiertas, excluyendo ciertas ventanas
 def get_open_windows_menu():
@@ -69,17 +93,17 @@ def create_image():
 
 # Crear el menú de la bandeja del sistema
 def setup_tray_icon():
-    icon = pystray.Icon("transparency", create_image(), "Black Window")
+    icon = pystray.Icon("transparency", create_image(), "Transparency Control")
 
-    # Función para actualizar el menú regularmente
+    # Función para actualizar el menú regularmente solo cuando no está abierto
     def update_menu():
         while True:
-            icon.menu = pystray.Menu(
-                *get_open_windows_menu(),
-                item('Salir', lambda: icon.stop())
-            )
-            icon.update_menu()
-            time.sleep(5)  # Actualizar cada 5 segundos
+            if not icon.visible:  # Solo actualiza cuando el menú no está siendo usado
+                icon.menu = pystray.Menu(
+                    *get_open_windows_menu(),
+                    item('Salir', lambda: icon.stop())
+                )
+            time.sleep(5)  # Verificar cada 5 segundos
 
     # Iniciar el hilo de actualización del menú
     update_thread = threading.Thread(target=update_menu)
@@ -90,11 +114,14 @@ def setup_tray_icon():
 
 # Manejo de teclas para cambiar la opacidad
 def handle_keyboard_events():
-    # Flecha abajo: hace la ventana seleccionada opaca
-    keyboard.add_hotkey('down', darken_window)
+    # Flecha abajo: hace la ventana seleccionada invisible (0% de opacidad)
+    keyboard.add_hotkey('down', darken_windows)
 
-    # Flecha arriba: restaura la opacidad de la ventana seleccionada
-    keyboard.add_hotkey('up', restore_window)
+    # Flecha arriba: restaura la opacidad de la ventana seleccionada al 100% (255)
+    keyboard.add_hotkey('up', restore_windows)
+
+    # Flecha derecha: mostrar el mensaje "Creado por"
+    keyboard.add_hotkey('right', show_message)
 
     # Mantener el script en ejecución hasta que se presione la tecla "esc"
     keyboard.wait('esc')
